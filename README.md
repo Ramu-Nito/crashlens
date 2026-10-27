@@ -79,6 +79,15 @@ crashlens/
 pytest -v
 ```
 
+## Hosting
+
+- **Project page (Vercel):** `public/index.html` is served as a static site — `vercel.json` disables
+  framework detection and points the output at `public/`, so there is no build step.
+- **Dashboard (Streamlit Community Cloud):** create an app from this repo with main file
+  `app/dashboard.py`. A 100k-row demo warehouse is committed at `data/warehouse/crashlens.duckdb`,
+  so the app boots with data on the first run. Add `ANTHROPIC_API_KEY` under
+  **Settings → Secrets** to enable "Ask the Data".
+
 ## Tech stack
 
 Python · pandas · DuckDB · pandera · Streamlit · Plotly · Anthropic Claude API · pytest · GitHub Actions

@@ -69,9 +69,26 @@ class AskResult:
     data: pd.DataFrame
 
 
+def _api_key() -> str | None:
+    """API key from the environment, or from Streamlit secrets when hosted.
+
+    Streamlit Community Cloud exposes secrets via ``st.secrets`` rather than
+    environment variables, so both are supported.
+    """
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if key:
+        return key
+    try:
+        import streamlit as st
+
+        return st.secrets.get("ANTHROPIC_API_KEY") or None
+    except Exception:
+        return None
+
+
 def is_available() -> bool:
     """AI querying is enabled only when an API key is configured."""
-    return bool(os.environ.get("ANTHROPIC_API_KEY"))
+    return bool(_api_key())
 
 
 def _guard_sql(sql: str) -> str:
@@ -88,7 +105,7 @@ def generate_sql(question: str) -> tuple[str, str]:
     """Ask Claude for SQL answering the question. Returns (sql, explanation)."""
     import anthropic
 
-    client = anthropic.Anthropic()
+    client = anthropic.Anthropic(api_key=_api_key())
     response = client.messages.create(
         model=MODEL,
         max_tokens=2048,

@@ -115,7 +115,8 @@ with tab_ask:
     st.caption("Powered by Claude — your question is converted to SQL and run on the local DuckDB warehouse.")
     if not ask.is_available():
         st.info(
-            "Set the `ANTHROPIC_API_KEY` environment variable to enable AI querying.\n\n"
+            "Set the `ANTHROPIC_API_KEY` environment variable (or add it to Streamlit secrets) "
+            "to enable AI querying.\n\n"
             "PowerShell:  `$env:ANTHROPIC_API_KEY = 'sk-ant-...'`  then restart the app."
         )
     else:

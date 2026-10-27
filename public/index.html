@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>crashlens — NYC collision analytics, end to end</title>
+<meta name="description" content="An end-to-end data pipeline and Streamlit dashboard for NYC motor vehicle collisions: Socrata ingestion, pandera validation, a DuckDB warehouse, and natural-language SQL with Claude." />
+<meta name="theme-color" content="#060a12" />
+<meta property="og:title" content="crashlens — NYC collision analytics" />
+<meta property="og:description" content="Raw NYC crash data → validated DuckDB warehouse → interactive dashboard and natural-language SQL." />
+<meta property="og:type" content="website" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%9A%A6%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --bg: #060a12;
+    --panel: #0c1422;
+    --panel-2: #111c2f;
+    --line: rgba(148, 163, 184, .16);
+    --text: #e7eefb;
+    --muted: #94a6c0;
+    --amber: #fbbf24;
+    --sky: #38bdf8;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { width: min(1080px, 92vw); margin: 0 auto; }
+  .glow { position: fixed; pointer-events: none; z-index: 0; filter: blur(90px); opacity: .5; }
+  .glow-a { width: 520px; height: 520px; top: -220px; right: -120px; background: rgba(251, 191, 36, .16); }
+  .glow-b { width: 460px; height: 460px; top: 420px; left: -200px; background: rgba(56, 189, 248, .12); }
+
+  header { position: relative; z-index: 1; }
+  .nav { display: flex; align-items: center; justify-content: space-between; padding: 26px 0; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -.01em; font-size: 1.05rem; }
+  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 14px var(--amber); }
+  .nav-links { display: flex; gap: 22px; font-size: .9rem; color: var(--muted); }
+  .nav-links a { text-decoration: none; }
+  .nav-links a:hover { color: var(--text); }
+  @media (max-width: 720px) { .nav-links { display: none; } }
+
+  main { position: relative; z-index: 1; }
+  .hero { padding: 54px 0 40px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--amber); border: 1px solid rgba(251, 191, 36, .28);
+    background: rgba(251, 191, 36, .07); padding: 7px 12px; border-radius: 999px;
+  }
+  h1 {
+    font-size: clamp(2.3rem, 6vw, 4rem);
+    line-height: 1.05; letter-spacing: -.035em; font-weight: 800;
+    margin: 22px 0 18px; max-width: 17ch;
+  }
+  h1 .accent { color: var(--amber); }
+  .lede { color: var(--muted); font-size: clamp(1rem, 1.6vw, 1.15rem); max-width: 62ch; margin: 0 0 30px; }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 13px 20px; border-radius: 10px; font-weight: 650; font-size: .95rem;
+    text-decoration: none; border: 1px solid transparent; transition: transform .15s ease, background .15s ease;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-primary { background: var(--amber); color: #1a1205; }
+  .btn-primary:hover { background: #fcd34d; }
+  .btn-ghost { border-color: var(--line); background: rgba(255, 255, 255, .02); color: var(--text); }
+  .btn-ghost:hover { background: rgba(255, 255, 255, .05); }
+
+  .lane { height: 2px; margin: 46px 0 0; background: repeating-linear-gradient(90deg, rgba(251, 191, 36, .55) 0 26px, transparent 26px 52px); opacity: .5; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 34px 0 10px; }
+  .stat { border: 1px solid var(--line); background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,0)); border-radius: 14px; padding: 18px; }
+  .stat b { display: block; font-size: 1.5rem; letter-spacing: -.02em; }
+  .stat span { color: var(--muted); font-size: .8rem; font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase; }
+  @media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+
+  section { padding: 64px 0 8px; }
+  .kicker { font-family: var(--mono); font-size: .72rem; letter-spacing: .16em; text-transform: uppercase; color: var(--sky); margin: 0 0 10px; }
+  h2 { font-size: clamp(1.5rem, 3vw, 2.1rem); letter-spacing: -.025em; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 26px; max-width: 62ch; }
+
+  .pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .step {
+    font-family: var(--mono); font-size: .8rem; padding: 10px 14px; border-radius: 9px;
+    border: 1px solid var(--line); background: var(--panel); color: #cfe0f7;
+  }
+  .step b { color: var(--amber); font-weight: 600; }
+  .arrow { color: #47607f; font-size: .9rem; }
+  @media (max-width: 720px) { .arrow { display: none; } .pipeline { gap: 8px; } }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 620px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    border: 1px solid var(--line); border-radius: 16px; padding: 22px;
+    background: linear-gradient(180deg, rgba(255,255,255,.035), rgba(255,255,255,.01));
+  }
+  .card h3 { margin: 0 0 8px; font-size: 1rem; letter-spacing: -.01em; }
+  .card p { margin: 0; color: var(--muted); font-size: .9rem; }
+  .icon { font-size: 1.15rem; margin-bottom: 10px; display: block; }
+
+  .ask-grid { display: grid; grid-template-columns: 1fr 1.15fr; gap: 22px; align-items: start; }
+  @media (max-width: 860px) { .ask-grid { grid-template-columns: 1fr; } }
+  .bubble {
+    border: 1px solid var(--line); border-left: 3px solid var(--sky);
+    background: var(--panel); border-radius: 12px; padding: 16px 18px; font-size: .95rem;
+  }
+  .bubble span { display: block; color: var(--muted); font-size: .72rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .12em; margin-bottom: 6px; }
+  pre {
+    margin: 0; background: #080e19; border: 1px solid var(--line); border-radius: 12px;
+    padding: 18px; overflow-x: auto; font-family: var(--mono); font-size: .82rem; line-height: 1.65; color: #cfe0f7;
+  }
+  .k { color: var(--sky); } .s { color: #a7f3d0; } .c { color: #5b7391; }
+
+  .run { display: grid; grid-template-columns: 1fr 1.1fr; gap: 26px; align-items: start; }
+  @media (max-width: 860px) { .run { grid-template-columns: 1fr; } }
+  .run ol { margin: 0; padding-left: 20px; color: var(--muted); font-size: .92rem; }
+  .run ol li { margin-bottom: 10px; }
+  .run ol b { color: var(--text); font-weight: 600; }
+
+  .host { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; justify-content: space-between;
+    border: 1px solid var(--line); border-radius: 18px; padding: 26px;
+    background: radial-gradient(600px 200px at 0% 0%, rgba(251,191,36,.10), transparent 70%), var(--panel); }
+  .host p { margin: 6px 0 0; color: var(--muted); font-size: .9rem; max-width: 52ch; }
+  .host h3 { margin: 0; font-size: 1.1rem; }
+
+  footer { position: relative; z-index: 1; margin-top: 70px; border-top: 1px solid var(--line); padding: 26px 0 40px; color: var(--muted); font-size: .85rem; }
+  footer .row { display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between; align-items: center; }
+  footer a { color: var(--text); text-decoration: none; border-bottom: 1px solid rgba(255,255,255,.18); }
+  footer a:hover { border-color: var(--amber); }
+
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 6px; }
+</style>
+</head>
+<body>
+  <div class="glow glow-a"></div>
+  <div class="glow glow-b"></div>
+
+  <header>
+    <div class="wrap nav">
+      <a class="brand" href="/" aria-label="crashlens home"><span class="dot"></span> crashlens</a>
+      <nav class="nav-links" aria-label="Sections">
+        <a href="#pipeline">Pipeline</a>
+        <a href="#features">Features</a>
+        <a href="#ask">Ask the data</a>
+        <a href="#run">Run it</a>
+        <a href="https://github.com/Ramu-Nito/crashlens">GitHub ↗</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <span class="eyebrow">NYC Open Data · Python · Streamlit</span>
+      <h1>Every NYC crash, from raw API to <span class="accent">an answer.</span></h1>
+      <p class="lede">
+        crashlens ingests live motor-vehicle collision data from the NYC Open Data API, cleans and validates it,
+        loads a DuckDB warehouse, and serves an interactive dashboard — including natural-language querying
+        powered by Claude.
+      </p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/Ramu-Nito/crashlens">Read the source <span aria-hidden="true">→</span></a>
+        <a class="btn btn-ghost" href="#run">Run it locally</a>
+      </div>
+      <div class="lane" aria-hidden="true"></div>
+    </section>
+
+    <div class="stats">
+      <div class="stat"><b>100k</b><span>crash records</span></div>
+      <div class="stat"><b>5</b><span>NYC boroughs</span></div>
+      <div class="stat"><b>20</b><span>validated columns</span></div>
+      <div class="stat"><b>16</b><span>passing tests</span></div>
+    </div>
+
+    <section id="pipeline">
+      <p class="kicker">How it works</p>
+      <h2>A pipeline with real data-quality gates.</h2>
+      <p class="sub">Paged Socrata requests with retries and a parquet cache, pandas cleaning, a pandera schema that rejects bad rows before they reach the warehouse, and a read-only DuckDB connection behind every query.</p>
+      <div class="pipeline" aria-label="Pipeline stages">
+        <span class="step"><b>01</b> ingest</span><span class="arrow">→</span>
+        <span class="step"><b>02</b> clean</span><span class="arrow">→</span>
+        <span class="step"><b>03</b> validate</span><span class="arrow">→</span>
+        <span class="step"><b>04</b> DuckDB</span><span class="arrow">→</span>
+        <span class="step"><b>05</b> dashboard</span><span class="arrow">→</span>
+        <span class="step"><b>06</b> ask</span>
+      </div>
+    </section>
+
+    <section id="features">
+      <p class="kicker">Features</p>
+      <h2>Built like production, small enough to run locally.</h2>
+      <div class="grid">
+        <article class="card">
+          <span class="icon" aria-hidden="true">📡</span>
+          <h3>Resilient ingestion</h3>
+          <p>Pages through the Socrata SODA API with retries, exponential backoff, and a local parquet cache.</p>
+        </article>
+        <article class="card">
+          <span class="icon" aria-hidden="true">🛡️</span>
+          <h3>Data-quality gates</h3>
+          <p>A pandera schema enforces types, value ranges, NYC geo-bounds, and uniqueness before loading.</p>
+        </article>
+        <article class="card">
+          <span class="icon" aria-hidden="true">🦆</span>
+          <h3>Columnar warehouse</h3>
+          <p>Cleaned data lands in DuckDB for fast analytical SQL, opened read-only by the dashboard.</p>
+        </article>
+        <article class="card">
+          <span class="icon" aria-hidden="true">📊</span>
+          <h3>Interactive dashboard</h3>
+          <p>Monthly trends, contributing factors, vehicle types, and a 20k-point crash map with filters.</p>
+        </article>
+        <article class="card">
+          <span class="icon" aria-hidden="true">🤖</span>
+          <h3>Ask the data</h3>
+          <p>Plain-English questions become SQL through Claude, with SELECT-only guardrails and a read-only connection.</p>
+        </article>
+        <article class="card">
+          <span class="icon" aria-hidden="true">✅</span>
+          <h3>Tested &amp; CI'd</h3>
+          <p>A pytest suite covers transforms, validation, and SQL guards; GitHub Actions runs it on every push.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="ask">
+      <p class="kicker">Ask the data</p>
+      <h2>Question in, SQL and results out.</h2>
+      <div class="ask-grid">
+        <div>
+          <div class="bubble">
+            <span>You ask</span>
+            Which borough had the most cyclist injuries in 2024?
+          </div>
+          <p class="sub" style="margin-top:16px">
+            Claude writes a single SELECT statement, the app explains it, runs it on the read-only
+            warehouse, and returns the table — no SQL required.
+          </p>
+        </div>
+        <pre aria-label="Example generated SQL"><span class="c">-- generated by Claude, guarded to SELECT-only</span>
+<span class="k">SELECT</span> borough,
+       <span class="k">SUM</span>(cyclists_injured) <span class="k">AS</span> injuries
+<span class="k">FROM</span> crashes
+<span class="k">WHERE</span> crash_year = <span class="s">2024</span>
+<span class="k">GROUP BY</span> borough
+<span class="k">ORDER BY</span> injuries <span class="k">DESC</span>
+<span class="k">LIMIT</span> <span class="s">5</span>;</pre>
+      </div>
+    </section>
+
+    <section id="run">
+      <p class="kicker">Quickstart</p>
+      <h2>Run the whole thing in four commands.</h2>
+      <div class="run">
+        <ol>
+          <li><b>Create an environment</b> and install the dependencies.</li>
+          <li><b>Run the pipeline</b> with <code>--limit 100000</code> for a quick first pull.</li>
+          <li><b>Launch the dashboard</b> with Streamlit.</li>
+          <li><b>Optional:</b> set <code>ANTHROPIC_API_KEY</code> to enable AI querying.</li>
+        </ol>
+        <pre aria-label="Quickstart commands"><span class="c"># 1. install</span>
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+pip install -e .
+
+<span class="c"># 2. build the warehouse</span>
+python -m crashlens.pipeline --limit 100000
+
+<span class="c"># 3. launch</span>
+streamlit run app/dashboard.py</pre>
+      </div>
+    </section>
+
+    <section id="host">
+      <div class="host">
+        <div>
+          <h3>Host the dashboard</h3>
+          <p>The interactive app runs on Streamlit Community Cloud (this page is the static project overview, hosted on Vercel). A 100k-row demo warehouse ships with the repo, so the app boots with data on the first run.</p>
+        </div>
+        <a class="btn btn-primary" href="https://share.streamlit.io/deploy?repository=https://github.com/Ramu-Nito/crashlens&amp;branch=main&amp;mainModule=app/dashboard.py">Deploy on Streamlit <span aria-hidden="true">→</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap row">
+      <span>crashlens · data from <a href="https://data.cityofnewyork.us/Public-Safety/Motor-Vehicle-Collisions-Crashes/h9gi-nx95">NYC Open Data</a></span>
+      <span>Built by <a href="https://github.com/Ramu-Nito">Ramūnas Leonardas Šeduikis</a> · <a href="https://github.com/Ramu-Nito/crashlens">source</a></span>
+    </div>
+  </footer>
+</body>
+</html>
